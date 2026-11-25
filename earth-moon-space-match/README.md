@@ -1,9 +1,7 @@
 # Earth, Moon, and Space: Bilingual Vocabulary Match
 
-Grade 6 matching game with 16 English/Japanese vocabulary pairs.
+[Play the game](https://serpicota-cmyk.github.io/Simualtion/earth-moon-space-match/)
 
-Open index.html in a browser. No build or dependencies required.
+Drag each English/Japanese vocabulary word onto its matching definition. Correct targets turn green immediately. Incorrect targets turn red briefly, and the word remains available to retry. Each definition has an English read-aloud button using browser speech synthesis.
 
-Drag a definition onto a vocabulary word, or select the definition and then select the word. Correct targets turn green immediately; wrong targets turn red briefly and the definition stays available. Each definition includes English read-aloud using the browser's speech synthesis. Voice availability depends on the browser and device.
-
-Restart reshuffles the definitions. Keyboard users can use Tab and Enter or Space.
+Tap a word then a definition, or use Tab and Enter/Space. Restart reshuffles the words. Includes all 16 Grade 6 science vocabulary pairs. No build or dependencies required; open index.html locally or use the live link.
