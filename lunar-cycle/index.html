@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lunar Cycle Simulator</title>
+<meta name="description" content="Explore the Moon’s orbit, rotation, and phases.">
+<style>
+:root{color-scheme:dark;--ink:#f3f4ff;--muted:#aebbd4;--accent:#a9e9e0;--line:#364769;--panel:#111a2f}
+*{box-sizing:border-box}body{margin:0;background:#0a1020;color:var(--ink);font:16px system-ui,sans-serif}main{max-width:1160px;margin:auto;padding:38px 24px}h1,h2,p{margin:0}h1{font-size:clamp(2rem,5vw,3.4rem);letter-spacing:-.055em}h2{font-size:1rem;letter-spacing:.015em}.sub{margin-top:8px;color:var(--muted)}.views{display:grid;grid-template-columns:1.65fr 1fr;gap:16px;margin-top:24px}.panel{min-width:0;border:1px solid var(--line);border-radius:20px;background:var(--panel);overflow:hidden}.panel h2{padding:17px 20px;border-bottom:1px solid var(--line)}.stage{position:relative;aspect-ratio:1.22;min-height:300px;touch-action:none;user-select:none;background:radial-gradient(ellipse at 48% 50%,#172444,#0c1428 72%)}#orbit{width:100%;height:100%;display:block}.markers{position:absolute;inset:0;pointer-events:none}.marker{position:absolute;transform:translate(-50%,-50%);border:1px solid #627593;border-radius:50%;width:clamp(53px,10vw,73px);aspect-ratio:1;padding:3px;background:#111b30b8;color:var(--ink);font:650 clamp(.62rem,1.45vw,.75rem)/1.1 system-ui;white-space:pre-line;pointer-events:auto;touch-action:none;cursor:pointer}.marker.active{border-color:var(--accent);box-shadow:0 0 12px #82e6d34d}.marker.active span{display:block;transform:translateY(19px)}.drag-moon{position:absolute;transform:translate(-50%,-50%);width:34px;height:34px;cursor:grab;touch-action:none}.stage.dragging,.stage.dragging .drag-moon{cursor:grabbing}.observation{text-align:center;display:flex;flex-direction:column;align-items:center;padding:18px 12px 22px}.sky{display:block;width:min(100%,295px);height:auto;margin:4px auto 10px}.phase{font-size:clamp(1.45rem,3vw,2.15rem);font-weight:750;letter-spacing:-.04em}.readout{color:var(--accent);font-weight:700;margin-top:8px}.meaning{color:var(--muted);min-height:2.6em;margin-top:6px;font-size:.92rem}.controls{margin-top:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}.controls button{font:650 .9rem system-ui;color:var(--ink);background:#192640;border:1px solid #455779;border-radius:9px;min-height:44px;padding:8px 13px;cursor:pointer}.controls .play{background:var(--accent);color:#102523;border-color:var(--accent);min-width:77px}.day{font-weight:750;margin-left:auto;font-variant-numeric:tabular-nums}.speed{color:var(--muted);font-size:.84rem}.note{margin-top:14px;color:var(--muted);font-size:.82rem}.marker:focus-visible,button:focus-visible{outline:3px solid #ffd883;outline-offset:3px}
+@media(max-width:760px){main{padding:22px 12px}.views{grid-template-columns:1fr}.stage{min-height:285px}.sky{width:min(62vw,235px)}.speed{flex-basis:100%;text-align:right}}
+.views{align-items:start}
+.observation{padding:8px 12px 14px}
+.sky{width:min(62%,205px);margin:0 auto 4px}
+.drag-moon{width:46px;height:46px}
+.marker.active span{transform:translateY(22px)}
+</style>
+</head>
+<body>
+<main>
+<header><h1>Lunar Cycle Simulator</h1><p class="sub">Drag the Moon around Earth or select a labeled circle.</p></header>
+<div class="views">
+<section class="panel"><h2>Moon’s orbit from above</h2>
+<div class="stage" id="stage">
+<canvas id="orbit" role="img" aria-label="Orbit diagram with sunlight entering from the right and axis lines on Earth and the Moon"></canvas>
+<div class="markers" id="markers"></div><canvas id="drag-moon" class="drag-moon" width="68" height="68" aria-hidden="true"></canvas>
+</div></section>
+<section class="panel"><h2>View from Earth</h2>
+<div class="observation"><canvas id="sky" class="sky" width="360" height="330" role="img" aria-label="Appearance of the Moon from Earth"></canvas>
+<p id="phase" class="phase"></p><p id="readout" class="readout"></p><p id="meaning" class="meaning"></p></div></section>
+</div>
+<div class="controls">
+<button id="play" class="play" type="button">Go</button>
+<button id="prev" type="button">−1 day</button><button id="next" type="button">+1 day</button><button id="reset" type="button">Reset</button>
+<output class="day" id="day" aria-live="off"></output><span class="speed">1 second = 1 simulated day</span>
+</div>
+<p class="note">The teal dot marks the same spot in both views. From Earth it stays in the center as sunlight moves across the face. Sizes, distances, and axis lines are schematic.</p>
+</main>
+<script>
+'use strict';
+const tau = 2 * Math.PI;
+const year = 365.256;
+const lunarOrbit = 27.32166;
+const cycle = 1 / (1 / lunarOrbit - 1 / year);
+const phaseNames = ['New Moon','Waxing Crescent','First Quarter','Waxing Gibbous','Full Moon','Waning Gibbous','Third Quarter','Waning Crescent'];
+const wrap = (value, period) => ((value % period) + period) % period;
+const byId = id => document.getElementById(id);
+const stage = byId('stage');
+const orbit = byId('orbit');
+const moon = byId('drag-moon');
+const sky = byId('sky');
+const play = byId('play');
+const markers = phaseNames.map((name, index) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'marker';
+  button.setAttribute('aria-label', name);
+  const label = document.createElement('span');
+  label.textContent = name.replace(' ', '\n');
+  button.append(label);
+  button.addEventListener('click', event => {
+    if (event.detail && moved) return;
+    pause();
+    time = Math.floor(time / cycle) * cycle + index * cycle / 8;
+    draw();
+  });
+  byId('markers').append(button);
+  return button;
+});
+let time = 0;
+let lastFrame = null;
+let frame = null;
+let pointer = null;
+let moved = false;
+let pointerStart;
+let startedOnMoon;
+let previousAngle;
+let dragTime;
+let width, height, centerX, centerY, radius;
+let lastPhase = -1;
+const orbitContext = orbit.getContext('2d');
+
+function place(angle) {
+  return [centerX + radius * Math.cos(angle), centerY - radius * Math.sin(angle)];
+}
+
+function line(context, x1, y1, x2, y2) {
+  context.beginPath();
+  context.moveTo(x1, y1);
+  context.lineTo(x2, y2);
+  context.stroke();
+}
+
+function circle(context, x, y, size, fill) {
+  context.beginPath();
+  context.arc(x, y, size, 0, tau);
+  if (fill) {
+    context.fillStyle = fill;
+    context.fill();
+  } else context.stroke();
+}
+
+function axis(context, x, y, r, slope) {
+  context.strokeStyle = '#e1edff';
+  context.lineWidth = 1.25;
+  line(context, x - slope*r, y + 1.3*r, x + slope*r, y - 1.3*r);
+}
+
+const craters = Array.from({length: 24}, (_, index) => ({
+  lon: index * 2.39996,
+  lat: Math.asin(2 * (index + .5) / 24 - 1),
+  size: .11 + .11 * (Math.sin(index * 8.93) + 1)
+}));
+
+function sphereTexture(size, isEarth, tilt) {
+  const pixels = [];
+  const output = document.createElement('canvas');
+  output.width = output.height = size;
+  const context = output.getContext('2d');
+  const image = context.createImageData(size, size);
+  const cos = Math.cos(tilt);
+  const sin = Math.sin(tilt);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = (x + .5) * 2 / size - 1;
+      const v = 1 - (y + .5) * 2 / size;
+      const depth = 1 - u*u - v*v;
+      if (depth <= 0) continue;
+      const z = Math.sqrt(depth);
+      const longitude = Math.atan2(u*cos - v*sin, z);
+      const latitude = Math.asin(u*sin + v*cos);
+      pixels.push({i: (y * size + x) * 4, u, z, longitude, latitude});
+    }
+  }
+
+  // Store the lunar surface once. Light moves across the same surface.
+  const texture = (longitude, latitude) => {
+    let color = 182 + 12*Math.sin(9*longitude + 8*latitude) + 8*Math.cos(15*latitude - 11*longitude);
+    for (const crater of craters) {
+      const dx = Math.atan2(Math.sin(longitude - crater.lon), Math.cos(longitude - crater.lon)) * Math.cos(latitude);
+      const dy = latitude - crater.lat;
+      const distance = Math.hypot(dx,dy) / crater.size;
+      if (distance < .8) color -= 34 * (1 - distance/2);
+      else if (distance < 1) color += 19;
+    }
+    return color;
+  };
+  if (!isEarth) for (const pixel of pixels) pixel.color = texture(pixel.longitude, pixel.latitude);
+
+  return (contextOut, x, y, diameter, spin, lightX, lightZ) => {
+    for (const {i,u,z,longitude,latitude,color} of pixels) {
+      const light = u*lightX + z*lightZ;
+      const brightness = .13 + .87*Math.min(1, Math.max(0, light*4.5));
+      if (isEarth) {
+        const lon = longitude - spin;
+        const land = Math.sin(2*lon + Math.sin(3*latitude)) + .75*Math.cos(3*lon - 4*latitude) + .4*Math.sin(6*lon + 9*latitude) > .46;
+        const ice = Math.abs(latitude) > 1.19;
+        const palette = ice ? [215,235,249] : land ? [89,178,134] : [55,137,214];
+        image.data[i] = palette[0]*brightness;
+        image.data[i+1] = palette[1]*brightness;
+        image.data[i+2] = palette[2]*brightness;
+      } else {
+        const surface = spin ? texture(longitude - spin, latitude) : color;
+        image.data[i] = surface*brightness;
+        image.data[i+1] = surface*brightness*1.02;
+        image.data[i+2] = surface*brightness*1.09 + 6;
+      }
+      image.data[i+3] = 255;
+    }
+    context.putImageData(image, 0, 0);
+    contextOut.drawImage(output, x-diameter/2, y-diameter/2, diameter, diameter);
+  };
+}
+const earthSphere = sphereTexture(76, true, .28);
+const earthView = sphereTexture(234, false, 0);
+const moonContext = moon.getContext('2d');
+const skyContext = sky.getContext('2d');
+
+function nearSideMarker(context, x, y, size) {
+  circle(context,x,y,size,'#10182d');
+  context.strokeStyle = '#8ff9e1';
+  context.lineWidth = size*.32;
+  circle(context,x,y,size*.68);
+}
+
+function drawOrbitMoon(angle) {
+  const context = moonContext;
+  const center = 34;
+  const radius = 24;
+  context.clearRect(0,0,68,68);
+  context.save();
+  context.translate(center,center);
+  circle(context,0,0,radius,'#b7b9c7');
+  context.save();
+  context.rotate(-angle);
+  circle(context,9,-9,7,'#777c91');
+  circle(context,11,-11,4,'#8f93a6');
+  circle(context,-5,11,5,'#81869b');
+  circle(context,-10,-8,3,'#8f93a6');
+  context.restore();
+
+  // Keep the terminator aligned with the Sun while the surface rotates.
+  context.fillStyle = '#10182dba';
+  context.beginPath();
+  context.arc(0,0,radius,Math.PI/2,3*Math.PI/2);
+  context.closePath();
+  context.fill();
+  context.restore();
+  axis(context,center,center,radius,.13);
+
+  // The marked point stays on the Earth-facing side of the rotating Moon.
+  const markerX = center-16*Math.cos(angle);
+  const markerY = center+16*Math.sin(angle);
+  nearSideMarker(context,markerX,markerY,6);
+}
+
+function draw() {
+  const age = wrap(time, cycle);
+  const angle = age / cycle * tau;
+  const [mx,my] = place(angle);
+  const context = orbitContext;
+  context.clearRect(0,0,width,height);
+  context.strokeStyle = '#607293';
+  context.lineWidth = 1.1;
+  circle(context, centerX, centerY, radius);
+
+  context.save();
+  context.strokeStyle = '#839ec0';
+  context.setLineDash([4,5]);
+  line(context, centerX, centerY, mx, my);
+  context.restore();
+
+  const arrowAngle = .38;
+  const [arrowX,arrowY] = place(arrowAngle);
+  context.save();
+  context.translate(arrowX,arrowY);
+  context.rotate(-arrowAngle);
+  context.fillStyle = '#9bb1d1';
+  context.beginPath();
+  context.moveTo(0,-7);
+  context.lineTo(4,4);
+  context.lineTo(-4,4);
+  context.fill();
+  context.restore();
+
+  const sunRadius = height*1.36;
+  const sunX = width+sunRadius-width*.115;
+  const sunY = height/2;
+  const sunlight = context.createRadialGradient(sunX,sunY,0,sunX,sunY,sunRadius);
+  sunlight.addColorStop(.73,'#fff5c2');
+  sunlight.addColorStop(.94,'#ffe493');
+  sunlight.addColorStop(1,'#f7a63f');
+  context.save();
+  context.shadowColor = '#ffb65088';
+  context.shadowBlur = 23;
+  circle(context,sunX,sunY,sunRadius,sunlight);
+  context.restore();
+  context.fillStyle = '#2b190d';
+  context.textAlign = 'right';
+  context.font = '750 13px system-ui';
+  context.fillText('Sun',width-5,sunY+5);
+  context.strokeStyle = '#ffdb8a';
+  for (const y of [height*.26,height*.74]) {
+    const startX = width*.86;
+    const endX = startX-Math.min(44,width*.09);
+    line(context,startX,y,endX,y);
+    line(context,endX,y,endX+6,y-3);
+    line(context,endX,y,endX+6,y+3);
+  }
+
+  const earthRadius = Math.min(43,width*.09);
+  earthSphere(context,centerX,centerY,earthRadius*2,tau*wrap(time,1),1,0);
+  axis(context,centerX,centerY,earthRadius,.39);
+  context.fillStyle = '#dbe7ff';
+  context.textAlign = 'center';
+  context.font = '600 13px system-ui';
+  context.fillText('Earth',centerX,centerY+earthRadius*1.3+15);
+
+  moon.style.left = mx + 'px';
+  moon.style.top = my + 'px';
+  drawOrbitMoon(angle);
+
+  skyContext.clearRect(0,0,360,330);
+  skyContext.strokeStyle = '#596580';
+  skyContext.lineWidth = 1.6;
+  circle(skyContext,180,165,127);
+  earthView(skyContext,180,165,254,0,Math.sin(angle),-Math.cos(angle));
+  // The center of the Earth view is the point on the Moon facing Earth.
+  nearSideMarker(skyContext,180,165,8);
+
+  const position = age / cycle * 8;
+  const nearest = Math.round(position) % 8;
+  const aligned = Math.abs(position-Math.round(position)) < .045;
+  markers.forEach((marker,index) => {
+    const selected = aligned && nearest === index;
+    marker.classList.toggle('active', selected);
+    marker.setAttribute('aria-pressed', selected);
+  });
+  const quarter = position / 2;
+  const nearQuarter = Math.abs(quarter-Math.round(quarter)) < .023;
+  const phaseIndex = nearQuarter ? 2*(Math.round(quarter)%4) : 2*Math.floor(quarter)+1;
+  const fraction = (1-Math.cos(angle))/2;
+  const atNewOrFull = nearQuarter && phaseIndex%4===0;
+  const trend = age < cycle/2 ? 'Waxing' : 'Waning';
+  if (phaseIndex !== lastPhase) {
+    byId('phase').textContent = phaseNames[phaseIndex];
+    sky.setAttribute('aria-label',phaseNames[phaseIndex]+' as seen from Earth');
+    lastPhase = phaseIndex;
+  }
+  byId('readout').textContent = Math.round(fraction*100)+'% lit' + (atNewOrFull ? '' : ' · '+trend+(trend==='Waxing'?' ↑':' ↓'));
+  byId('meaning').textContent = atNewOrFull
+    ? (phaseIndex===0 ? 'The lit half faces away from Earth.' : 'The lit half faces Earth.')
+    : (trend==='Waxing' ? 'More of the lit half becomes visible.' : 'Less of the lit half becomes visible.');
+  byId('day').textContent = 'Day '+time.toFixed(1);
+}
+
+function resize() {
+  const bounds = stage.getBoundingClientRect();
+  width = bounds.width;
+  height = bounds.height;
+  const density = Math.min(window.devicePixelRatio || 1, 2);
+  orbit.width = Math.round(width*density);
+  orbit.height = Math.round(height*density);
+  orbitContext.setTransform(density,0,0,density,0,0);
+  centerX = width*.44;
+  centerY = height*.53;
+  radius = Math.min(width*.31,height*.34);
+  markers.forEach((marker,index) => {
+    const [x,y] = place(index*tau/8);
+    marker.style.left = x+'px';
+    marker.style.top = y+'px';
+  });
+  draw();
+}
+new ResizeObserver(resize).observe(stage);
+resize();
+
+function pause() {
+  if (frame !== null) cancelAnimationFrame(frame);
+  frame = null;
+  lastFrame = null;
+  play.textContent = 'Go';
+}
+function tick(now) {
+  if (lastFrame !== null) time += (now-lastFrame)/1000;
+  lastFrame = now;
+  draw();
+  frame = requestAnimationFrame(tick);
+}
+play.addEventListener('click', () => {
+  if (frame !== null) {
+    pause();
+    return;
+  }
+  play.textContent = 'Pause';
+  lastFrame = performance.now();
+  frame = requestAnimationFrame(tick);
+});
+function step(delta) {
+  pause();
+  time = Math.max(0,time+delta);
+  draw();
+}
+byId('prev').onclick = () => step(-1);
+byId('next').onclick = () => step(1);
+byId('reset').onclick = () => {pause();time=0;draw();};
+
+function pointerAngle(event) {
+  const bounds = stage.getBoundingClientRect();
+  return Math.atan2(centerY-(event.clientY-bounds.top),event.clientX-bounds.left-centerX);
+}
+stage.addEventListener('pointerdown', event => {
+  if (pointer !== null || event.button !== 0) return;
+  moved = false;
+  startedOnMoon = event.target === moon;
+  const bounds = stage.getBoundingClientRect();
+  const distance = Math.hypot(event.clientX-bounds.left-centerX,event.clientY-bounds.top-centerY);
+  if (!startedOnMoon && !event.target.closest('.marker') && Math.abs(distance-radius)>22) return;
+  pointer = event.pointerId;
+  pointerStart = [event.clientX,event.clientY];
+  previousAngle = pointerAngle(event);
+  dragTime = time;
+});
+stage.addEventListener('pointermove', event => {
+  if (event.pointerId !== pointer) return;
+  if (!moved && Math.hypot(event.clientX-pointerStart[0],event.clientY-pointerStart[1])<6) return;
+  if (!moved) {
+    pause();
+    stage.setPointerCapture(pointer);
+    stage.classList.add('dragging');
+    moved = true;
+    if (!startedOnMoon) {
+      dragTime = Math.floor(time/cycle)*cycle + wrap(previousAngle,tau)*cycle/tau;
+    }
+  }
+  const angle = pointerAngle(event);
+  dragTime += wrap(angle-previousAngle+Math.PI,tau)/tau*cycle - cycle/2;
+  previousAngle = angle;
+  time = dragTime < 0 ? wrap(dragTime,cycle) : dragTime;
+  draw();
+});
+function endDrag(event) {
+  if (event.pointerId !== pointer) return;
+  pointer = null;
+  stage.classList.remove('dragging');
+  if (!moved || event.type !== 'pointerup') return;
+  const slot = Math.round(time/cycle*8)*cycle/8;
+  if (Math.abs(slot-time) < .30) {
+    time = slot;
+    draw();
+  }
+}
+stage.addEventListener('pointerup', endDrag);
+stage.addEventListener('pointercancel', endDrag);
+window.addEventListener('pointerup', endDrag);
+</script>
+</body>
+</html>
